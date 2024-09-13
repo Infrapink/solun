@@ -104,7 +104,7 @@ contains
   subroutine nutation(jday, nut)
     ! Calculate the nutation of the obliquity to the ecplitic
     real(8), intent(in) :: jday ! Julian Day in question
-    real(8), dimension(2), intent(out) :: nut ! Nutation to the ecliptic and of longitude
+    real(8), dimension(0:2), intent(out) :: nut ! Nutation to the ecliptic and of longitude
 
     real(8) :: T ! Julian Centuries since J2000.0
     real(8) :: D ! mean elonation of the moon from the sun
@@ -768,15 +768,15 @@ contains
     !epsilon0 = epsilon0 + delta_epsilon
     !epsilon0 = mod(epsilon0, 26.0) ! if the obliquity of the ecliptic is calculated more than 10,000 years from J2000.0. the numbers become silly. This keeps it within sensible boundaries.
     ! nut = (epsilon0, delta_psi)
-    nut(1) = epsilon0
-    nut(2) = delta_psi
+    nut(0) = epsilon0
+    nut(1) = delta_psi
+    nut(2) = delta_epsilon
   end subroutine nutation
 end module stellar_coords
 
 module solar_coords
   use stellar_coords  
   implicit none
-
 
   ! Calculate ecpliptic coordinates of the sun.
   ! Based on chapter 24 of *Astronomical Algorithms* by Jean Meeus
@@ -1318,7 +1318,7 @@ contains
 
     real(8) :: lon ! ecliptic longitude
     real(8) :: lat ! ecliptic latitude
-    real(8), dimension(2) :: nut ! nutation factors
+    real(8), dimension(3) :: nut ! nutation factors
 
     real(8) :: pi
     real(8) :: d2r ! convert degrees to radians
@@ -1395,7 +1395,6 @@ contains
     !print *, radec
   end subroutine solar_radec
 end module solar_coords
-
 
 module lunar_coords
   use solar_coords
@@ -1869,6 +1868,8 @@ contains
     ltable(60,4) = -2
     ltable(60,5) = 0
 
+    sigma_l = 0.0
+
     do i = 1, 60
 
        Dterm = D * ltable(i, 1)
@@ -2068,7 +2069,7 @@ contains
     ! real(8) :: midnight ! Sidereal time at midnight
     ! real(8) :: alpha
     real(8) :: corr ! correction to mean sidereal time to get apparent sidereal time
-    real(8), dimension(2) :: epsi ! nutation factors
+    real(8), dimension(3) :: epsi ! nutation factors
     real(8) :: d2r ! convert degrees to radians
 
     T = (jday - 2451545.0) / 36525.0
@@ -2085,7 +2086,7 @@ contains
   end subroutine getsid
 
   subroutine sidstant(jday, inst, answer)
-    ! Calculate sidereal time for any instant a Greenwich
+    ! Calculate sidereal time for any instant at Greenwich
     ! Based on Meeus, chapter 12
     real(8), intent(in) :: jday ! Julian Day in question
     real(8), intent(in) :: inst ! time since midnight that we're interested in
@@ -2099,14 +2100,14 @@ contains
     answer = midnight + inc
   end subroutine sidstant
 
-  subroutine solar_riset(jday, lon, lat, deltat, time)
+  subroutine solar_riset(jday, lon, lat, time)
     ! Calculte the time of sunrise and sunset
     ! Based on Meeus, chapter 15
     
     real(8), intent(in) :: jday ! Julian Day in question
     real(8), intent(in) :: lon ! observer's longitude, in degrees
     real(8), intent(in) :: lat ! observer's latitude, in degrees
-    real(8), intent(in) :: deltat
+    !real(8), intent(in) :: deltat
     real(8), dimension(2), intent(out) :: time ! time of sunrise and sunset, in days and fractions of a day
 
     real(8) :: ra2000
@@ -2133,7 +2134,7 @@ contains
     real(8), dimension(2) :: today ! RA and dec of day
     real(8), dimension(2) :: tomorrow ! RA and dec of next day
     !integer :: id ! sun or star!
-    real(8), dimension(2) :: nut ! nutation values for use in calculating the sun's position
+    real(8), dimension(3) :: nut ! nutation values for use in calculating the sun's position
     
     pi = 4.0 * atan(1.0)
     d2r = pi / 180.0
@@ -2261,6 +2262,11 @@ contains
     call precession((jday - 1), ra2000, dec2000, distance, rv, deltara, deltadec, yesterday) ! right ascension and declination of the previous day, in degrees
     call precession(jday, ra2000, dec2000, distance, rv, deltara, deltadec, today) ! right ascension and declination of the day in question, in degrees
     call precession((jday + 1), ra2000, dec2000, distance, rv, deltara, deltadec, tomorrow) ! right ascension and declination of the next day, in degrees
+
+    !print *, "Initial values: ", ra2000, dec2000
+    !print *, "Yesterday: ", yesterday
+    !print *, "Today: ", today
+    !print *, "Tomorrow: ", tomorrow
   
     testval = (sin(d2r * h0) - (sin(d2r * lat) * sin(d2r * today(2)))) / (cos(d2r * lat) * cos(d2r * today(2)))
     !print *, yesterday
@@ -2282,6 +2288,7 @@ contains
        time = 25.0
     else
        bigh = acos(testval)
+       !print *, "bigh = ", (r2d * bigh)
        !print *, testval
        !print *, (r2d * bigh)
        call getsid(jday, sid)
@@ -2358,4 +2365,110 @@ contains
     !print *, time
   end subroutine stellar_riset
 end module sidereal
+
+module pub
+  ! subroutines which can be called from outside this library
+  ! I'm doing this because, depending on your environment, it might not be possible to directly
+  ! call a subroutine if its module is used by another module
+  use stellar_coords
+  use solar_coords
+  use lunar_coords
+  use sidereal
+  implicit none
+
+contains
+  subroutine pub_solar_longitude(jday, lon)
+    ! Returns solar longitude at a given time
+    double precision, intent(in)  :: jday ! Julian Day in question
+    double precision, intent(out) :: lon  ! solar longitude
+    call solar_longitude(jday, lon)
+  end subroutine pub_solar_longitude
+
+  subroutine pub_lunar_longitude(jday, lon)
+    ! Returns lunar longitude at a given time
+    double precision, intent(in)  :: jday ! Julian Day in question
+    double precision, intent(out) :: lon  ! lunar longitude
+    call lunar_longitude(jday, lon)
+  end subroutine pub_lunar_longitude
+
+  subroutine pub_solar_time(jday, angle, time)
+    ! Returns the time that the sun hits a given ecliptic longitude
+    double precision, intent(in)  :: jday  ! Julian Day in question
+    double precision, intent(in)  :: angle ! ecliptic longitude
+    double precision, intent(out) :: time  ! time that the sun hits angle
+    call solar_time(jday, angle, time)
+  end subroutine pub_solar_time
+
+  subroutine pub_lunar_time(jday, time)
+    ! Returns the time of the new moon closes to jday
+    double precision, intent(in)  :: jday ! Julian Day we're starting with
+    integer, intent(out) :: time ! Time of the new moon
+    call lunar_time(jday, time)
+  end subroutine pub_lunar_time
+
+  subroutine pub_solar_riset(jday, lon, lat, time)
+    ! Returns the time of sunrise and sunset on a given day
+    double precision, intent(in)  :: jday ! Julian Day in question
+    double precision, intent(in)  :: lon  ! Observer's geographical longitude, in degrees
+    double precision, intent(in)  :: lat  ! Observer's geographical latitude, in degrees
+    double precision, dimension(2), intent(out) :: time ! Time of sunrise and sunset
+    call solar_riset(jday, lon, lat, time)
+  end subroutine pub_solar_riset
+
+  subroutine pub_stellar_riset(jday, lon, lat, deltat, ra2000, dec2000, distance, rv, deltara, deltadec, time)
+    ! Returns the time of a star's rising and setting
+    double precision, intent(in)  :: jday ! Julian Day under consideration
+    double precision, intent(in)  :: lon  ! observer's geographical longitude, in degrees
+    double precision, intent(in)  :: lat  ! observer's geographical latitude, in degrees
+    double precision, intent(in)  :: deltat ! difference between universal time and dynamical time
+    double precision, intent(in)  :: ra2000 ! right ascension at J2000.0
+    double precision, intent(in)  :: dec2000 ! declination at J2000.0
+    double precision, intent(in)  :: distance ! distance from the sun, in parsecs
+    double precision, intent(in)  :: rv ! radial velocity, in parsecs per year
+    double precision, intent(in)  :: deltara ! RA component of proper motion, in ARCSECONDS
+    double precision, intent(in)  :: deltadec ! Dec component of proper motion, in ARCSECONDS
+    double precision, dimension(2), intent(out) :: time ! time of sunrise and sunset
+    call stellar_riset(jday, lon, lat, deltat, ra2000, dec2000, distance, rv, deltara, deltadec, time)
+  end subroutine pub_stellar_riset
+
+  subroutine pub_propmot(jday, ra, dec, distance, rv, dra, ddec, answer)
+    ! Returns the proper motion of a star
+    double precision, intent(in)  :: jday
+    double precision, intent(in)  :: ra
+    double precision, intent(in)  :: dec
+    double precision, intent(in)  :: distance
+    double precision, intent(in)  :: rv
+    double precision, intent(in)  :: dra
+    double precision, intent(in)  :: ddec
+    double precision, dimension(2), intent(out) :: answer
+    call propmot(jday, ra, dec, distance, rv, dra, ddec, answer)
+  end subroutine pub_propmot
+
+  subroutine pub_nutation(jday, nut)
+    ! Returns the nutation at a given time
+    double precision, intent(in)  :: jday
+    double precision, dimension(0:2), intent(out) :: nut
+    call nutation(jday, nut)
+  end subroutine pub_nutation
+
+  subroutine pub_solar_radec(jday, radec)
+    ! Returns the right ascension and declination of the sun at a given time
+    double precision, intent(in)  :: jday
+    double precision, dimension(2), intent(out) :: radec
+    call solar_radec(jday, radec)
+  end subroutine pub_solar_radec
+
+  subroutine pub_precession(jday, ra2000, dec2000, distance, rv, deltara, deltadec, answer)
+    ! Return the precession at a given time
+    double precision, intent(in)  :: jday
+    double precision, intent(in)  :: ra2000
+    double precision, intent(in)  :: dec2000
+    double precision, intent(in)  :: distance
+    double precision, intent(in)  :: rv
+    double precision, intent(in)  :: deltara
+    double precision, intent(in)  :: deltadec
+    double precision, dimension(2), intent(out) :: answer
+    call precession(jday, ra2000, dec2000, distance, rv, deltara, deltadec, answer)
+  end subroutine pub_precession
+end module pub
 
